@@ -1,14 +1,17 @@
 const puppeteer = require('puppeteer');
 const TelegramBot = require('node-telegram-bot-api');
-const credentials = require('./acc-credentials.json');
 const chromeFinder = require('chrome-finder');
+const credentials = require('./acc-credentials.json');
+
 const chromePath = chromeFinder();
 
-const token = '6290336367:AAE0jQ-tB6TYzS_Z4Q5qhFrEeO-aKBhwF0I';
+const token = credentials.token;
 const groupBot = new TelegramBot(token, { polling: true });
 
 const username = credentials.username;
 const password = credentials.password;
+
+const botRegex = /(.+)/;
 
 const rounds = {
     "1": 0,
@@ -37,7 +40,6 @@ async function calcRounds(page){
         console.log("Error at calcRounds occurred: " + err);
     }
 }
-
 
 function matchMessage(msg){
     const KEYWORDS = ["Trade Type", "Trading variety", "BTC/USDT", "Trade amount", "Trading Time", "Attention, everybody!"];
@@ -97,10 +99,10 @@ async function login(username, password, page){
 
         await Promise.all([
             page.click(".mt40.bgblue.white.tc.h48.lh48.radius2.pointer.ft20"),
-            page.waitForNavigation()
+            page.waitForNavigation({timeout: 10000})
         ]);
 
-        await page.waitForSelector('.block.w100.h100.swiperhover.bgheader');
+        await page.waitForSelector('.block.w100.h100.swiperhover.bgheader', {timeout: 10000});
 
     }
     catch(err){
@@ -114,7 +116,7 @@ async function preparePage(page){
     try{
         await page.goto("https://www.ceremose.com/#/second");
 
-        await page.waitForSelector(".flex.alcenter.between.bgpart.bdbe9 .flex.alcenter");
+        await page.waitForSelector(".flex.alcenter.between.bgpart.bdbe9 .flex.alcenter", {timeout: 5000});
         await page.click(".flex.alcenter.between.bgpart.bdbe9 .flex.alcenter p:nth-child(2)");
         await page.waitForTimeout(2000);
     }
@@ -154,6 +156,36 @@ async function doBet(page, amount, direction){
 
 async function main(){
     try {
+        console.log("Started Bot");
+        groupBot.sendMessage("5800148650", `Bot for account ${username} has started.`);
+        clearInterval(timer);
+
+        const timeLimit = 40 * 60 * 1000;
+        const clockRate = 60 * 1000;
+        let startTime = new Date();
+
+        const botInterval = setInterval(botCheckTime, clockRate);
+
+        function botCheckTime(){
+            let timeNow = new Date();
+
+            if (timeNow - startTime > timeLimit){
+                console.log("Stopping the bot");
+                stopBot();
+                timer = setInterval(timerCheckTime, clockInterval);
+            }
+            else{
+                groupBot.sendMessage('5800148650', `${((timeLimit - (timeNow - startTime)) / 60000).toFixed(2)} minutes left to close the bot.`);
+                console.log(`${((timeLimit - (timeNow - startTime)) / 60000).toFixed(2)} minutes left to close the bot.`);
+            }
+        }
+
+        function stopBot(){
+            browser.close();
+            groupBot.removeTextListener(botRegex);
+            clearInterval(botInterval);
+        }
+
         const browser = await puppeteer.launch({headless: false,
         executablePath: chromePath});
 
@@ -165,11 +197,14 @@ async function main(){
 
         await calcRounds(page);
 
-        groupBot.onText(/(.+)/, (msg) => {
+        function checkMessage(msg){
             try {
                 console.log(`Received message: ${msg.text}`);
 
                 if (!matchMessage(msg.text)) return;
+
+                // restarting startTime
+                startTime = new Date();
 
                 let direction = getDirection(msg.text);
                 let time = getTime(msg.text);
@@ -183,6 +218,13 @@ async function main(){
                     console.log("The date-time object is older than the current time.");
                     return;
                 }
+
+                if (((time - new Date()) / 60000) > 10){
+                    console.log("The bet time is more than 10 minutes in the future.");
+                    return;
+                }
+
+                groupBot.sendMessage('5800148650', `Catched trading message at time: ${time.getHours()}:${time.getMinutes()}:${time.getSeconds()}`);
 
                 const intervalId = setInterval(checkTime, 500);
 
@@ -200,17 +242,61 @@ async function main(){
                         doBet(page, rounds[round], direction);
                         clearInterval(intervalId);
                     }
-                    console.log("It's not time");
+                    else{
+                        console.log("It's not time");
+                    }
                 }
             } catch (err) {
                 console.log("Error at receiving message from telegram: " + err);
             }
-        });
+        }
+
+        groupBot.onText(botRegex, checkMessage);
     }
     catch(err){
         console.log("Error while launching browser occurred: " + err);
     }
 }
 
-main();
+const startTime = {
+    "hour": 19,
+    "minute": 40
+}
 
+const clockInterval = 5 * 60 * 1000;
+let didTradingToday = false;
+
+let todayDate = 0;
+
+let timer = setInterval(timerCheckTime, clockInterval);
+timerCheckTime();
+
+function timerCheckTime(){
+    let timeNow = new Date();
+    let startTimeDate = new Date();
+
+    startTimeDate.setHours(startTime.hour);
+    startTimeDate.setMinutes(startTime.minute);
+
+    if (timeNow.getDate() !== todayDate && didTradingToday){
+        todayDate = timeNow.getDate();
+        didTradingToday = false;
+        console.log("Day changed");
+    }
+
+    if (didTradingToday){
+        console.log("Today was already traiding");
+        return;
+    }
+
+    // check if it is not Saturday and is after startTime
+    if (timeNow >startTimeDate && new Date().getDay() !== 6){
+        didTradingToday = true;
+        main();
+    }
+    else{
+        console.log(`It's not time to start bot. Left ${(startTimeDate - timeNow)/3600000} hours`);
+    }
+
+
+}
