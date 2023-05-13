@@ -6,10 +6,11 @@ const credentials = require('./acc-credentials.json');
 const chromePath = chromeFinder();
 
 const token = credentials.token;
-const groupBot = new TelegramBot(token, { polling: true });
+const bot = new TelegramBot(token, { polling: true });
 
 const username = credentials.username;
 const password = credentials.password;
+const telegramUserId = "5800148650";
 
 const botRegex = /(.+)/;
 
@@ -25,8 +26,7 @@ const rounds = {
 
 async function calcRounds(page){
     try {
-        await page.waitForSelector('.tc.flex.bgpart.ptb20.ft14 .flex1.hidden-xs .pt15.ft22');
-        const amount = await eval(`page.$eval('.tc.flex.bgpart.ptb20.ft14 .flex1.hidden-xs .pt15.ft22', val => parseFloat(val.innerText))`);
+        const amount = await getAccMoney(page);
 
         rounds["1"] = amount * 0.005;
         rounds["2"] = amount * 0.012;
@@ -38,6 +38,18 @@ async function calcRounds(page){
     }
     catch(err){
         console.log("Error at calcRounds occurred: " + err);
+    }
+}
+
+async function getAccMoney(page){
+    try{
+        await page.waitForSelector('.tc.flex.bgpart.ptb20.ft14 .flex1.hidden-xs .pt15.ft22');
+        return await eval(`page.$eval('.tc.flex.bgpart.ptb20.ft14 .flex1.hidden-xs .pt15.ft22', val => parseFloat(val.innerText))`);
+    }
+    catch(err){
+        console.log("Error while getting account money occurred: " + err);
+        await page.waitForTimeout(3000);
+        await getAccMoney();
     }
 }
 
@@ -106,7 +118,7 @@ async function login(username, password, page){
 
     }
     catch(err){
-        console.log("Error at logging in occured: " + err);
+        console.log("Error at logging in occurred: " + err);
         await page.waitForTimeout(3000);
         await login(username, password, page);
     }
@@ -121,9 +133,9 @@ async function preparePage(page){
         await page.waitForTimeout(2000);
     }
     catch(err){
-        console.log("Error at preparing page occured: " + err);
+        console.log("Error at preparing page occurred: " + err);
         await page.waitForTimeout(3000);
-        preparePage(page);
+        await preparePage(page);
     }
 }
 
@@ -157,8 +169,9 @@ async function doBet(page, amount, direction){
 async function main(){
     try {
         console.log("Started Bot");
-        groupBot.sendMessage("5800148650", `Bot for account ${username} has started.`);
+        bot.sendMessage(telegramUserId, `Bot for account <b>${username}</b> has started.`, { parse_mode: 'HTML' });
         clearInterval(timer);
+
 
         const timeLimit = 40 * 60 * 1000;
         const clockRate = 60 * 1000;
@@ -175,14 +188,14 @@ async function main(){
                 timer = setInterval(timerCheckTime, clockInterval);
             }
             else{
-                groupBot.sendMessage('5800148650', `${((timeLimit - (timeNow - startTime)) / 60000).toFixed(2)} minutes left to close the bot.`);
                 console.log(`${((timeLimit - (timeNow - startTime)) / 60000).toFixed(2)} minutes left to close the bot.`);
             }
         }
 
         function stopBot(){
             browser.close();
-            groupBot.removeTextListener(botRegex);
+            bot.removeTextListener(botRegex);
+            bot.sendMessage(telegramUserId, `Trading day ended with <b>${endRoundMoney} USDT</b> and a cumulative profit of <b>${endRoundMoney-startRoundMoney} USDT</b>`, { parse_mode: 'HTML' });
             clearInterval(botInterval);
         }
 
@@ -197,22 +210,21 @@ async function main(){
 
         await calcRounds(page);
 
+        const startDayMoney = await getAccMoney(page);
+        let startRoundMoney;
+        let endRoundMoney;
+
+        bot.sendMessage(telegramUserId, `Trading day started with <b>${startDayMoney} USDT</b>`, { parse_mode: 'HTML' });
+
         function checkMessage(msg){
             try {
                 console.log(`Received message: ${msg.text}`);
 
                 if (!matchMessage(msg.text)) return;
 
-                // restarting startTime
-                startTime = new Date();
-
                 let direction = getDirection(msg.text);
                 let time = getTime(msg.text);
                 let round = getRound(msg.text);
-
-                if (round == 1) {
-                    calcRounds(page);
-                }
 
                 if (time < new Date()) {
                     console.log("The date-time object is older than the current time.");
@@ -224,14 +236,25 @@ async function main(){
                     return;
                 }
 
-                groupBot.sendMessage('5800148650', `Catched trading message at time: ${time.getHours()}:${time.getMinutes()}:${time.getSeconds()}`);
+                if (round == 1) {
+                    calcRounds(page);
+
+                    getAccMoney(page).then(money => {
+                        startRoundMoney = money;
+                    });
+                }
+
+                // restarting startTime
+                startTime = new Date();
+
+                bot.sendMessage(telegramUserId, `Trade round <b>${round}</b> is at: <b>${time.getHours()}:${time.getMinutes()}:${time.getSeconds()}</b>`, { parse_mode: 'HTML' });
 
                 const intervalId = setInterval(checkTime, 500);
 
                 function checkTime() {
                     let timeNow = new Date();
 
-                    timeNow.setSeconds(timeNow.getSeconds() + 3);
+                    timeNow.setSeconds(timeNow.getSeconds() + 4);
 
                     console.log("time now: " + timeNow);
                     console.log("bet time: " + time);
@@ -240,6 +263,12 @@ async function main(){
                         console.log("It's time");
                         console.log(rounds);
                         doBet(page, rounds[round], direction);
+                        setTimeout(() => {
+                            getAccMoney(page).then(money => {
+                                endRoundMoney = money;
+                                bot.sendMessage(telegramUserId, `Round <b>${round}</b> ended with <b>${endRoundMoney} USDT</b> and a profit of <b>${endRoundMoney - startRoundMoney} USDT </b>`, { parse_mode: 'HTML' })
+                            });
+                        }, 2.5 * 60 * 1000)
                         clearInterval(intervalId);
                     }
                     else{
@@ -251,7 +280,7 @@ async function main(){
             }
         }
 
-        groupBot.onText(botRegex, checkMessage);
+        bot.onText(botRegex, checkMessage);
     }
     catch(err){
         console.log("Error while launching browser occurred: " + err);
