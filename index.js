@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer');
 const TelegramBot = require('node-telegram-bot-api');
 const chromeFinder = require('chrome-finder');
-const credentials = require('./acc-credentials.json');
+const credentials = require('./acc-credentials3.json');
 
 const chromePath = chromeFinder();
 
@@ -10,7 +10,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 const username = credentials.username;
 const password = credentials.password;
-const telegramUserId = "5800148650";
+const telegramUserId = credentials.telegramID;
 
 const botRegex = /(.+)/;
 
@@ -39,6 +39,26 @@ async function calcRounds(page){
     catch(err){
         console.log("Error at calcRounds occurred: " + err);
     }
+}
+
+function toLocalTime(londonTime){
+    // Create a new Date object using the current date and time in UTC
+    const currentDate = new Date();
+
+// Get the time zone offset of the current location in minutes
+    const offsetInMinutes = currentDate.getTimezoneOffset();
+
+// Convert the London time to the local time by applying the offset
+    const localTime = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth(),
+        currentDate.getDate(),
+        londonTime.getHours() - offsetInMinutes/60 - 1,
+        londonTime.getMinutes(),
+        londonTime.getSeconds()
+    );
+
+    return localTime
 }
 
 async function getAccMoney(page){
@@ -80,12 +100,12 @@ function getTime(msg){
         const timeString = match[1];
         const [hours, minutes, seconds] = timeString.split('：');
 
-        const dateTime = new Date();
-        dateTime.setHours(parseInt(hours) + 2);
-        dateTime.setMinutes(minutes);
-        dateTime.setSeconds(seconds);
+        const londonTime = new Date();
+        londonTime.setHours(hours);
+        londonTime.setMinutes(minutes);
+        londonTime.setSeconds(seconds);
 
-        return dateTime;
+        return toLocalTime(londonTime);
     } else {
         console.log("No matching time found in the text.");
     }
@@ -195,7 +215,7 @@ async function main(){
         function stopBot(){
             browser.close();
             bot.removeTextListener(botRegex);
-            bot.sendMessage(telegramUserId, `Trading day ended with <b>${endRoundMoney} USDT</b> and a cumulative profit of <b>${endRoundMoney-startRoundMoney} USDT</b>`, { parse_mode: 'HTML' });
+            bot.sendMessage(telegramUserId, `Trading day ended with <b>${endRoundMoney} USDT</b> and a cumulative profit of <b>${endRoundMoney-startDayMoney} USDT</b>`, { parse_mode: 'HTML' });
             clearInterval(botInterval);
         }
 
@@ -288,7 +308,7 @@ async function main(){
 }
 
 const startTime = {
-    "hour": 19,
+    "hour": 17,
     "minute": 40
 }
 
@@ -306,6 +326,8 @@ function timerCheckTime(){
 
     startTimeDate.setHours(startTime.hour);
     startTimeDate.setMinutes(startTime.minute);
+
+    startTimeDate = toLocalTime(startTimeDate);
 
     if (timeNow.getDate() !== todayDate && didTradingToday){
         todayDate = timeNow.getDate();
