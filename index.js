@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const TelegramBot = require('node-telegram-bot-api');
 const chromeFinder = require('chrome-finder');
+const {getTimezoneOffset} = require('date-fns-tz');
 const credentials = require('./acc-credentials3.json');
 
 const chromePath = chromeFinder();
@@ -26,7 +27,7 @@ const rounds = {
 
 async function calcRounds(page){
     try {
-        const amount = await getAccMoney(page);
+        const amount = Math.floor(await getAccMoney(page));
 
         rounds["1"] = amount * 0.005;
         rounds["2"] = amount * 0.012;
@@ -46,14 +47,15 @@ function toLocalTime(londonTime){
     const currentDate = new Date();
 
 // Get the time zone offset of the current location in minutes
-    const offsetInMinutes = currentDate.getTimezoneOffset();
+    const localTimeOffset = currentDate.getTimezoneOffset();
+    const londonTimeOffset = getTimezoneOffset("Europe/London", new Date())/(1000*60*60);
 
 // Convert the London time to the local time by applying the offset
     const localTime = new Date(
         currentDate.getFullYear(),
         currentDate.getMonth(),
         currentDate.getDate(),
-        londonTime.getHours() - offsetInMinutes/60 - 1,
+        londonTime.getHours() - localTimeOffset/60 - londonTimeOffset,
         londonTime.getMinutes(),
         londonTime.getSeconds()
     );
@@ -257,8 +259,6 @@ async function main(){
                 }
 
                 if (round == 1) {
-                    calcRounds(page);
-
                     getAccMoney(page).then(money => {
                         startRoundMoney = money;
                     });
@@ -274,7 +274,7 @@ async function main(){
                 function checkTime() {
                     let timeNow = new Date();
 
-                    timeNow.setSeconds(timeNow.getSeconds() + 4);
+                    timeNow.setSeconds(timeNow.getSeconds() + 3);
 
                     console.log("time now: " + timeNow);
                     console.log("bet time: " + time);
@@ -315,7 +315,7 @@ const startTime = {
 const clockInterval = 5 * 60 * 1000;
 let didTradingToday = false;
 
-let todayDate = 0;
+let todayDate = new Date().getDate();
 
 let timer = setInterval(timerCheckTime, clockInterval);
 timerCheckTime();
@@ -330,6 +330,9 @@ function timerCheckTime(){
     startTimeDate = toLocalTime(startTimeDate);
 
     if (timeNow.getDate() !== todayDate && didTradingToday){
+        console.log("todayDate: " + todayDate);
+        console.log("timeNow.getDate(): " + timeNow.getDate());
+
         todayDate = timeNow.getDate();
         didTradingToday = false;
         console.log("Day changed");
