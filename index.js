@@ -2,18 +2,21 @@ const puppeteer = require('puppeteer');
 const TelegramBot = require('node-telegram-bot-api');
 const chromeFinder = require('chrome-finder');
 const {getTimezoneOffset} = require('date-fns-tz');
-const credentials = require('./acc-credentials3.json');
+const fs = require('fs');
+
+const credentialsPath = './acc-credentials3.json';
 
 const chromePath = chromeFinder();
 
-const token = credentials.token;
+const token = getCredentials('token');
 const bot = new TelegramBot(token, { polling: true });
 
-const username = credentials.username;
-const password = credentials.password;
-const telegramUserId = credentials.telegramID;
+const telegramUserId = getCredentials('telegramID');
+
+const telegramGroupBotsAdmin = '5800148650';
 
 const botRegex = /(.+)/;
+const roundRegex = /^\/round (.+)/;
 
 const rounds = {
     "1": 0,
@@ -25,42 +28,53 @@ const rounds = {
     "7": 0
 }
 
-async function calcRounds(page){
+async function calcStrategy(page){
     try {
-        const amount = Math.floor(await getAccMoney(page));
+        let amount = await getStrategyAmount(page);
 
-        rounds["1"] = amount * 0.005;
-        rounds["2"] = amount * 0.012;
-        rounds["3"] = amount * 0.026;
-        rounds["4"] = amount * 0.055;
-        rounds["5"] = amount * 0.118;
-        rounds["6"] = amount * 0.25;
-        rounds["7"] = amount * 0.533;
+        rounds["1"] = parseFloat((amount * 0.005).toFixed(3));
+        rounds["2"] = parseFloat((amount * 0.012).toFixed(3));
+        rounds["3"] = parseFloat((amount * 0.026).toFixed(3));
+        rounds["4"] = parseFloat((amount * 0.055).toFixed(3));
+        rounds["5"] = parseFloat((amount * 0.118).toFixed(3));
+        rounds["6"] = parseFloat((amount * 0.25).toFixed(3));
+        rounds["7"] = parseFloat((amount * 0.534).toFixed(3));
     }
     catch(err){
-        console.log("Error at calcRounds occurred: " + err);
+        console.log("Error at calcStrategy occurred: " + err);
     }
 }
 
-function toLocalTime(londonTime){
+function getLondonTime(){
     // Create a new Date object using the current date and time in UTC
     const currentDate = new Date();
 
 // Get the time zone offset of the current location in minutes
-    const localTimeOffset = currentDate.getTimezoneOffset();
+    const localTimeOffset = currentDate.getTimezoneOffset()/60;
     const londonTimeOffset = getTimezoneOffset("Europe/London", new Date())/(1000*60*60);
 
-// Convert the London time to the local time by applying the offset
-    const localTime = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth(),
-        currentDate.getDate(),
-        londonTime.getHours() - localTimeOffset/60 - londonTimeOffset,
-        londonTime.getMinutes(),
-        londonTime.getSeconds()
-    );
+    currentDate.setHours(currentDate.getHours() - localTimeOffset - londonTimeOffset);
 
-    return localTime
+    return currentDate;
+}
+
+function toLocalTime(londonTime){
+    const localTimeOffset = new Date().getTimezoneOffset()/60;
+    const londonTimeOffset = getTimezoneOffset("Europe/London", new Date())/(1000*60*60);
+
+    londonTime.setHours(londonTime.getHours() - localTimeOffset - londonTimeOffset);
+
+    return londonTime;
+}
+
+async function getStrategyAmount(page){
+    let amount = getCredentials('strategy');
+
+    if (typeof amount !== "number" || isNaN(amount) || amount < 20){
+        amount = Math.floor(await getAccMoney(page));
+    }
+
+    return amount;
 }
 
 async function getAccMoney(page){
@@ -71,7 +85,7 @@ async function getAccMoney(page){
     catch(err){
         console.log("Error while getting account money occurred: " + err);
         await page.waitForTimeout(3000);
-        await getAccMoney();
+        await getAccMoney(page);
     }
 }
 
@@ -102,7 +116,7 @@ function getTime(msg){
         const timeString = match[1];
         const [hours, minutes, seconds] = timeString.split('：');
 
-        const londonTime = new Date();
+        const londonTime = getLondonTime();
         londonTime.setHours(hours);
         londonTime.setMinutes(minutes);
         londonTime.setSeconds(seconds);
@@ -122,11 +136,17 @@ function getRound(msg){
     return firstDigit;
 }
 
-async function login(username, password, page){
+async function login(page){
+    let username = getCredentials('username');
+    let password = getCredentials('password');
+
     try{
         await page.goto("https://www.ceremose.com/#/login?page=%2Flogin");
 
         await page.waitForSelector('[placeholder="Please enter your email"]');
+
+        await clearInput(page, '[placeholder="Please enter your email"]');
+        await clearInput(page, '[placeholder="Please enter a password"]');
 
         await page.type('[placeholder="Please enter your email"]', username);
         await page.type('[placeholder="Please enter a password"]', password);
@@ -142,7 +162,8 @@ async function login(username, password, page){
     catch(err){
         console.log("Error at logging in occurred: " + err);
         await page.waitForTimeout(3000);
-        await login(username, password, page);
+
+        await login(page);
     }
 }
 
@@ -161,13 +182,26 @@ async function preparePage(page){
     }
 }
 
+async function clearInput(page, selector){
+    try{
+        await eval(`(async () => {
+            await page.evaluate((selector) => {
+                const input = document.querySelector(selector);
+                input.value = '';
+            }, '${selector}');
+        })()`);
+    }
+    catch(err){
+        console.log(`Error occurred while clearing the input ${selector}: ${err}` );
+        await page.waitForTimeout(2000);
+        await clearInput(page,selector);
+    }
+}
+
 async function doBet(page, amount, direction){
     try {
         // clear the input
-        await eval(`page.evaluate(() => {
-            const input = document.querySelector('.el-input.el-input--suffix input.el-input__inner[type="number"]');
-            input.value = '';
-        })`);
+        await clearInput(page, '.el-input.el-input--suffix input.el-input__inner[type="number"]');
 
         await page.type('.el-input.el-input--suffix input.el-input__inner[type="number"]', amount.toString());
 
@@ -188,12 +222,14 @@ async function doBet(page, amount, direction){
     }
 }
 
-async function main(){
-    try {
-        console.log("Started Bot");
-        bot.sendMessage(telegramUserId, `Bot for account <b>${username}</b> has started.`, { parse_mode: 'HTML' });
-        clearInterval(timer);
+let isTradingStarted = false;
 
+async function startTrading(){
+    try {
+        isTradingStarted = true;
+        console.log("Started Bot");
+        bot.sendMessage(telegramUserId, `Bot for account <b>${getCredentials('username')}</b> has started.`, { parse_mode: 'HTML' });
+        clearInterval(timer);
 
         const timeLimit = 40 * 60 * 1000;
         const clockRate = 60 * 1000;
@@ -207,18 +243,23 @@ async function main(){
             if (timeNow - startTime > timeLimit){
                 console.log("Stopping the bot");
                 stopBot();
-                timer = setInterval(timerCheckTime, clockInterval);
+                timer = setInterval(startTradingCheckTime, clockInterval);
             }
             else{
                 console.log(`${((timeLimit - (timeNow - startTime)) / 60000).toFixed(2)} minutes left to close the bot.`);
             }
         }
 
+
         function stopBot(){
+            isTradingStarted = false;
             browser.close();
             bot.removeTextListener(botRegex);
+            bot.removeTextListener(stopTradingRegex);
+            bot.removeTextListener(roundRegex);
             bot.sendMessage(telegramUserId, `Trading day ended with <b>${endRoundMoney} USDT</b> and a cumulative profit of <b>${endRoundMoney-startDayMoney} USDT</b>`, { parse_mode: 'HTML' });
             clearInterval(botInterval);
+            clearInterval(checkTimeInterval);
         }
 
         const browser = await puppeteer.launch({headless: false,
@@ -227,20 +268,43 @@ async function main(){
         let page = await browser.newPage();
         await page.setViewport({width: 1566, height: 728});
 
-        await login(username, password, page);
+        await login(page);
         await preparePage(page);
 
-        await calcRounds(page);
+        await calcStrategy(page);
 
         const startDayMoney = await getAccMoney(page);
         let startRoundMoney;
         let endRoundMoney;
 
-        bot.sendMessage(telegramUserId, `Trading day started with <b>${startDayMoney} USDT</b>`, { parse_mode: 'HTML' });
+        let checkTimeInterval;
+
+        const stopTradingRegex = /^\/stop/;
+
+        bot.onText(stopTradingRegex, msg => {
+            const chatID = msg.chat.id;
+
+            if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+                return bot.sendMessage(chatID, "You don't have access to this bot.");
+            }
+
+            stopBot();
+            timer = setInterval(startTradingCheckTime, clockInterval);
+
+            bot.sendMessage(chatID, `Trading stopped`);
+        });
+
+        bot.sendMessage(telegramUserId, `Logged in successfuly. Trading day started with <b>${startDayMoney} USDT</b> and strategy amount of <b>${await getStrategyAmount(page)} USDT</b>.`, { parse_mode: 'HTML' });
 
         function checkMessage(msg){
             try {
                 console.log(`Received message: ${msg.text}`);
+
+                if (msg.from.id != telegramGroupBotsAdmin && msg.from.id != telegramUserId){
+                    console.log("The message was not sent by the right person.");
+                    console.log("Message.from.id: " + msg.from.id);
+                    return;
+                }
 
                 if (!matchMessage(msg.text)) return;
 
@@ -264,12 +328,30 @@ async function main(){
                     });
                 }
 
+                bot.onText(roundRegex, (msg, match) => {
+                    const chatID = msg.chat.id;
+
+                    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+                        return bot.sendMessage(chatID, "You don't have access to this bot.");
+                    }
+
+                    const value = match[1];
+
+                    if (value < 1 || value > 7){
+                        return bot.sendMessage(chatID, "Round should be between 1 and 7");
+                    }
+
+                    bot.sendMessage(chatID, `You changed trading round ${round} to ${value}.`);
+
+                    round = value;
+                });
+
                 // restarting startTime
                 startTime = new Date();
 
                 bot.sendMessage(telegramUserId, `Trade round <b>${round}</b> is at: <b>${time.getHours()}:${time.getMinutes()}:${time.getSeconds()}</b>`, { parse_mode: 'HTML' });
 
-                const intervalId = setInterval(checkTime, 500);
+                checkTimeInterval = setInterval(checkTime, 500);
 
                 function checkTime() {
                     let timeNow = new Date();
@@ -283,13 +365,17 @@ async function main(){
                         console.log("It's time");
                         console.log(rounds);
                         doBet(page, rounds[round], direction);
+
+                        bot.removeTextListener(roundRegex);
+
                         setTimeout(() => {
+                            if (page.isClosed()) return;
                             getAccMoney(page).then(money => {
                                 endRoundMoney = money;
                                 bot.sendMessage(telegramUserId, `Round <b>${round}</b> ended with <b>${endRoundMoney} USDT</b> and a profit of <b>${endRoundMoney - startRoundMoney} USDT </b>`, { parse_mode: 'HTML' })
                             });
                         }, 2.5 * 60 * 1000)
-                        clearInterval(intervalId);
+                        clearInterval(checkTimeInterval);
                     }
                     else{
                         console.log("It's not time");
@@ -301,15 +387,12 @@ async function main(){
         }
 
         bot.onText(botRegex, checkMessage);
+
+
     }
     catch(err){
         console.log("Error while launching browser occurred: " + err);
     }
-}
-
-const startTime = {
-    "hour": 17,
-    "minute": 40
 }
 
 const clockInterval = 5 * 60 * 1000;
@@ -317,17 +400,19 @@ let didTradingToday = false;
 
 let todayDate = new Date().getDate();
 
-let timer = setInterval(timerCheckTime, clockInterval);
-timerCheckTime();
+let timer = setInterval(startTradingCheckTime, clockInterval);
+startTradingCheckTime();
 
-function timerCheckTime(){
+function startTradingCheckTime(){
     let timeNow = new Date();
-    let startTimeDate = new Date();
 
-    startTimeDate.setHours(startTime.hour);
-    startTimeDate.setMinutes(startTime.minute);
+    let startTimeDate = getLondonTime();
+
+    startTimeDate.setHours(getCredentials('startTime').hour);
+    startTimeDate.setMinutes(getCredentials('startTime').minute);
 
     startTimeDate = toLocalTime(startTimeDate);
+
 
     if (timeNow.getDate() !== todayDate && didTradingToday){
         console.log("todayDate: " + todayDate);
@@ -346,11 +431,135 @@ function timerCheckTime(){
     // check if it is not Saturday and is after startTime
     if (timeNow >startTimeDate && new Date().getDay() !== 6){
         didTradingToday = true;
-        main();
+        startTrading();
     }
     else{
         console.log(`It's not time to start bot. Left ${(startTimeDate - timeNow)/3600000} hours`);
     }
-
-
 }
+
+bot.setMyCommands([
+    {command: '/info', description: 'Get info about user'},
+    {command: '/change', description: 'Change user\'s parameters'},
+    {command: '/stop', description: 'Stop trading'},
+    {command: '/run', description: 'Start trading'}
+]);
+
+bot.onText(/^\/info/, async msg => {
+    const chatID = msg.chat.id;
+
+    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+        return bot.sendMessage(chatID, "You don't have access to this bot.");
+    }
+
+    bot.sendMessage(chatID,
+        `<b>Your account username:</b> ${getCredentials('username')}
+<b>Your account password:</b> ${getCredentials('password')}
+<b>Starting time:</b> ${getCredentials('startTime').hour}:${getCredentials('startTime').minute} london time
+<b>Strategy amount:</b> ${getCredentials('strategy')} USDT
+        `, { parse_mode: 'HTML' });
+});
+
+function changeCredentials(parameter, newValue){
+    let file = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
+    file[parameter] = newValue;
+
+    fs.writeFileSync(credentialsPath, JSON.stringify(file, null, 2));
+}
+
+function getCredentials(parameter){
+    return JSON.parse(fs.readFileSync(credentialsPath, "utf-8"))[parameter];
+}
+
+bot.onText(/^\/change(?:\s+(\S+)\s+(\S+))?/, (msg, match) => {
+    const chatID = msg.chat.id;
+
+    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+        return bot.sendMessage(chatID, "You don't have access to this bot.");
+    }
+
+    const parameter = match[1];
+    const newValue = match[2];
+
+    if (parameter === 'username'){
+        changeCredentials('username', newValue);
+
+        return bot.sendMessage(chatID, `You changed successfully your username to ${newValue}. Make sure this is an existing username.`);
+    }
+    else if(parameter === 'password'){
+        changeCredentials('password', newValue);
+
+        return bot.sendMessage(chatID, `You changed successfully your password to ${newValue}. Make sure this is an existing password.`);
+    }
+    else if (parameter === 'strategy'){
+        if (newValue === 'remove'){
+            changeCredentials('strategy', 0);
+
+            return bot.sendMessage(chatID, `Your strategy was removed.`);
+        }
+
+        let amount = parseInt(newValue);
+
+        if (typeof amount !== "number" || isNaN(amount) || amount < 20){
+            return bot.sendMessage(chatID, "This command allows only numbers that are bigger than 20. /change strategy number");
+        }
+
+        changeCredentials('strategy', amount);
+
+        return bot.sendMessage(chatID, `You changed your trading strategy to ${amount}. Make sure you have enough money in your balance for this strategy.`);
+    }
+    else if(parameter === 'startHour'){
+        let number = parseInt(newValue);
+
+        if (isNaN(number) || number < 0 || number > 23){
+            return bot.sendMessage(chatID, `Hour should be a number in range of 0 - 23.`);
+        }
+
+        let startTime = getCredentials('startTime');
+
+        startTime.hour = number;
+        changeCredentials('startTime', startTime);
+
+        return bot.sendMessage(chatID, `You changed your trading hour to ${number}. 
+Now your trading start at ${getCredentials('startTime').hour}:${getCredentials('startTime').minute} london time`);
+    }
+    else if(parameter === 'startMinute'){
+        let number = parseInt(newValue);
+
+        if (isNaN(number) || number < 0 || number > 59){
+            return bot.sendMessage(chatID, `Minute should be a number in range of 0 - 59.`);
+        }
+
+        let startTime = getCredentials('startTime');
+
+        startTime.minute = number;
+        changeCredentials('startTime', startTime);
+
+        return bot.sendMessage(chatID, `You changed your trading minute to ${number}. 
+Now your trading start at ${getCredentials('startTime').hour}:${getCredentials('startTime').minute} london time`);
+    }
+
+    bot.sendMessage(chatID,
+        `Available commands for /change:
+    - /change strategy number
+    - /change strategy remove
+    - /change username newUsername
+    - /change password newPassword
+    - /change startMinute minute
+    - /change startHour hour
+`, { parse_mode: 'HTML' });
+});
+
+bot.onText(/^\/run/, msg => {
+    const chatID = msg.chat.id;
+
+    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+        return bot.sendMessage(chatID, "You don't have access to this bot.");
+    }
+
+    if (isTradingStarted){
+        return bot.sendMessage(chatID, "The trading has already started");
+    }
+
+    startTrading();
+});
