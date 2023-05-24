@@ -2,17 +2,16 @@ const puppeteer = require('puppeteer');
 const TelegramBot = require('node-telegram-bot-api');
 const chromeFinder = require('chrome-finder');
 const {getTimezoneOffset} = require('date-fns-tz');
+const path = require('path');
 const fs = require('fs');
 
-const credentialsPath = './acc-credentials3.json';
-
+const credentialsPath = path.join('acc-credentials2.json');
 const chromePath = chromeFinder();
 
 const token = getCredentials('token');
 const bot = new TelegramBot(token, { polling: true });
 
 const telegramUserId = getCredentials('telegramID');
-
 const telegramGroupBotsAdmin = '5800148650';
 
 const botRegex = /(.+)/;
@@ -356,7 +355,7 @@ async function startTrading(){
                 function checkTime() {
                     let timeNow = new Date();
 
-                    timeNow.setSeconds(timeNow.getSeconds() + 3);
+                    timeNow.setSeconds(timeNow.getSeconds() + 3 + parseInt(getCredentials('adjustTime'))/1000);
 
                     console.log("time now: " + timeNow);
                     console.log("bet time: " + time);
@@ -457,6 +456,7 @@ bot.onText(/^\/info/, async msg => {
 <b>Your account password:</b> ${getCredentials('password')}
 <b>Starting time:</b> ${getCredentials('startTime').hour}:${getCredentials('startTime').minute} london time
 <b>Strategy amount:</b> ${getCredentials('strategy')} USDT
+<b>Adjust time:</b> ${getCredentials('adjustTime')} ms
         `, { parse_mode: 'HTML' });
 });
 
@@ -538,6 +538,17 @@ Now your trading start at ${getCredentials('startTime').hour}:${getCredentials('
         return bot.sendMessage(chatID, `You changed your trading minute to ${number}. 
 Now your trading start at ${getCredentials('startTime').hour}:${getCredentials('startTime').minute} london time`);
     }
+    else if(parameter === 'adjustTime'){
+        let number = parseInt(newValue);
+
+        if (!number){
+            return bot.sendMessage(chatID, `Enter only numbers.`);
+        }
+
+        changeCredentials('adjustTime', number);
+
+        return bot.sendMessage(chatID, `You changed adjust time to ${number} milliseconds`);
+    }
 
     bot.sendMessage(chatID,
         `Available commands for /change:
@@ -547,6 +558,7 @@ Now your trading start at ${getCredentials('startTime').hour}:${getCredentials('
     - /change password newPassword
     - /change startMinute minute
     - /change startHour hour
+    - /change adjustTime milliseconds
 `, { parse_mode: 'HTML' });
 });
 
