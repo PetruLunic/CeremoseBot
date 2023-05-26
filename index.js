@@ -5,7 +5,7 @@ const {getTimezoneOffset} = require('date-fns-tz');
 const path = require('path');
 const fs = require('fs');
 
-const credentialsPath = path.join('acc-credentials2.json');
+const credentialsPath = path.join('acc-credentials.json');
 const chromePath = chromeFinder();
 
 const token = getCredentials('token');
@@ -49,10 +49,13 @@ function getLondonTime(){
     const currentDate = new Date();
 
 // Get the time zone offset of the current location in minutes
-    const localTimeOffset = currentDate.getTimezoneOffset()/60;
+    const localTimeOffset = -currentDate.getTimezoneOffset()/60;
     const londonTimeOffset = getTimezoneOffset("Europe/London", new Date())/(1000*60*60);
 
-    currentDate.setHours(currentDate.getHours() - localTimeOffset - londonTimeOffset);
+    console.log(`Local time offset: ${localTimeOffset}`);
+    console.log(`London time offset: ${londonTimeOffset}`)
+
+    currentDate.setHours(currentDate.getHours() - (localTimeOffset - londonTimeOffset));
 
     return currentDate;
 }
@@ -406,11 +409,14 @@ function startTradingCheckTime(){
     let timeNow = new Date();
 
     let startTimeDate = getLondonTime();
+    console.log(`LondonTime: ${startTimeDate}`)
 
     startTimeDate.setHours(getCredentials('startTime').hour);
     startTimeDate.setMinutes(getCredentials('startTime').minute);
 
     startTimeDate = toLocalTime(startTimeDate);
+    console.log(`Local time start: ${startTimeDate}`);
+    console.log(`Local Time: ${timeNow}`)
 
 
     if (timeNow.getDate() !== todayDate && didTradingToday){
