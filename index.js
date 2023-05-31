@@ -12,7 +12,6 @@ const token = getCredentials('token');
 const bot = new TelegramBot(token, { polling: true });
 
 const telegramUserId = getCredentials('telegramID');
-const telegramGroupBotsAdmin = '5800148650';
 
 const botRegex = /(.+)/;
 const roundRegex = /^\/round (.+)/;
@@ -233,7 +232,7 @@ async function startTrading(){
         bot.sendMessage(telegramUserId, `Bot for account <b>${getCredentials('username')}</b> has started.`, { parse_mode: 'HTML' });
         clearInterval(timer);
 
-        const timeLimit = 40 * 60 * 1000;
+        const timeLimit = 10 * 60 * 1000;
         const clockRate = 60 * 1000;
         let startTime = new Date();
 
@@ -286,7 +285,7 @@ async function startTrading(){
         bot.onText(stopTradingRegex, msg => {
             const chatID = msg.chat.id;
 
-            if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+            if (chatID != telegramUserId && chatID != getCredentials('forwardId')){
                 return bot.sendMessage(chatID, "You don't have access to this bot.");
             }
 
@@ -302,7 +301,7 @@ async function startTrading(){
             try {
                 console.log(`Received message: ${msg.text}`);
 
-                if (msg.from.id != telegramGroupBotsAdmin && msg.from.id != telegramUserId){
+                if (msg.from.id != getCredentials('forwardId') && msg.from.id != telegramUserId){
                     console.log("The message was not sent by the right person.");
                     console.log("Message.from.id: " + msg.from.id);
                     return;
@@ -333,7 +332,7 @@ async function startTrading(){
                 bot.onText(roundRegex, (msg, match) => {
                     const chatID = msg.chat.id;
 
-                    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+                    if (chatID != telegramUserId && chatID != getCredentials('forwardId')){
                         return bot.sendMessage(chatID, "You don't have access to this bot.");
                     }
 
@@ -447,13 +446,14 @@ bot.setMyCommands([
     {command: '/info', description: 'Get info about user'},
     {command: '/change', description: 'Change user\'s parameters'},
     {command: '/stop', description: 'Stop trading'},
-    {command: '/run', description: 'Start trading'}
+    {command: '/run', description: 'Start trading'},
+    {command: '/round', description: 'Change round number'}
 ]);
 
 bot.onText(/^\/info/, async msg => {
     const chatID = msg.chat.id;
 
-    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+    if (chatID != telegramUserId && chatID != getCredentials('forwardId')){
         return bot.sendMessage(chatID, "You don't have access to this bot.");
     }
 
@@ -480,12 +480,18 @@ function getCredentials(parameter){
 bot.onText(/^\/change(?:\s+(\S+)\s+(\S+))?/, (msg, match) => {
     const chatID = msg.chat.id;
 
-    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+    if (chatID != telegramUserId && chatID != getCredentials('forwardId')){
         return bot.sendMessage(chatID, "You don't have access to this bot.");
     }
 
     const parameter = match[1];
     const newValue = match[2];
+
+    if (parameter === 'group'){
+        changeCredentials('forwardId', newValue);
+
+        return bot.sendMessage(chatID, `You changed successfully your groupID to ${newValue}. Make sure this is correct ID.`);
+    }
 
     if (parameter === 'username'){
         changeCredentials('username', newValue);
@@ -565,13 +571,14 @@ Now your trading start at ${getCredentials('startTime').hour}:${getCredentials('
     - /change startMinute minute
     - /change startHour hour
     - /change adjustTime milliseconds
+    - /change group groupID
 `, { parse_mode: 'HTML' });
 });
 
 bot.onText(/^\/run/, msg => {
     const chatID = msg.chat.id;
 
-    if (chatID != telegramUserId && chatID != telegramGroupBotsAdmin){
+    if (chatID != telegramUserId && chatID != getCredentials('forwardId')){
         return bot.sendMessage(chatID, "You don't have access to this bot.");
     }
 
