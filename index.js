@@ -232,7 +232,7 @@ async function startTrading(){
         bot.sendMessage(telegramUserId, `Bot for account <b>${getCredentials('username')}</b> has started.`, { parse_mode: 'HTML' });
         clearInterval(timer);
 
-        const timeLimit = 10 * 60 * 1000;
+        const timeLimit = 40 * 60 * 1000;
         const clockRate = 60 * 1000;
         let startTime = new Date();
 
@@ -301,7 +301,7 @@ async function startTrading(){
             try {
                 console.log(`Received message: ${msg.text}`);
 
-                if (msg.from.id != getCredentials('forwardId') && msg.from.id != telegramUserId){
+                if (msg.chat.id != getCredentials('forwardId') && msg.chat.id != telegramUserId){
                     console.log("The message was not sent by the right person.");
                     console.log("Message.from.id: " + msg.from.id);
                     return;
